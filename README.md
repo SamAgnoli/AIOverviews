@@ -9,7 +9,7 @@ physician-rubric accuracy (GPT-4.1 grader).
 
 | Folder | Contents |
 |---|---|
-| `Supplementary_Material.docx` | The paper's supplementary material (Supplementary Methods and Results, Figure S1, Tables S1–S12). |
+| `Supplementary_Material.pdf` | The paper's supplementary material (Supplementary Methods and Results, Figure S1, Tables S1–S12). |
 | `analysis/` | `AIO_Overviews_Results.Rmd` reproduces every number, table, and figure in the main paper; `AIO_Overviews_Supplement.R` does the same for the supplement. Knitted output and figures are included. |
 | `data/` | The analysis files (one row per question, page, statement, rubric criterion, or GPT-4.1 verdict). |
 | `Manual Coding Checks/` | The two human-coding workbooks (JAMA/HONcode pages and HallOumi statements) that the agreement analyses read. |
