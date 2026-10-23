@@ -1,0 +1,488 @@
+---
+title: "Google AI Overviews for health questions: results in the main paper"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, comment = "", fig.width = 7, fig.height = 4.5)
+```
+
+Reproduces every number, table, and figure in the main text from the files in `../data` and the two coding workbooks in
+`../Manual Coding Checks`. Knit from the `analysis` folder; figures are saved to `figures/`. The analyses reported only in
+the supplement are in `AIO_Overviews_Supplement.R`.
+
+**Robustness check.** To rerun every analysis on single-turn questions of 44 words or fewer (the Results paragraph on
+short single-turn questions and Table S12), uncomment the second line below and knit again. Figures are then saved with
+the suffix `_short`.
+
+```{r toggle}
+SHORT_ONLY <- FALSE
+# SHORT_ONLY <- TRUE    # robustness check: single-turn questions of 44 words or fewer
+```
+
+# Setup
+
+```{r packages}
+library(dplyr); library(tidyr); library(tibble); library(readr); library(stringr); library(purrr)
+library(readxl); library(knitr); library(ggplot2)
+```
+
+```{r paths}
+DATA   <- "../data"
+MANUAL <- "../Manual Coding Checks"
+FIG    <- "figures"
+coding_sheet <- function(pattern) {
+  f <- list.files(MANUAL, pattern, full.names = TRUE, ignore.case = TRUE)
+  f <- f[!startsWith(basename(f), "~$")]
+  if (length(f) != 1) stop("Put the one workbook matching '", pattern, "' in ", MANUAL)
+  f }
+HAL_HUMAN <- coding_sheet("HallOumi.*\\.xlsx$")     # statement support: human coders and HallOumi
+JH_HUMAN  <- coding_sheet("JAMA.*HON.*\\.xlsx$")    # JAMA and HONcode: human coders
+dir.create(FIG, showWarnings = FALSE)
+```
+
+```{r helpers}
+LV <- c("Low", "Medium", "High"); B_REPS <- 2000; SEED <- 0
+CRIT <- c("JAMA_Authorship", "JAMA_Attribution", "JAMA_Disclosure", "JAMA_Currency", "HON_Authority", "HON_Complementarity")
+rd     <- function(f) read_csv(file.path(DATA, f), guess_max = 1e6, show_col_types = FALSE, na = c("", "NA", "nan", "NaN", "None"))
+r1     <- function(x, d = 1) round(x, d)
+msd    <- function(x) c(n = sum(!is.na(x)), M = mean(x, na.rm = TRUE), SD = sd(x, na.rm = TRUE), Mdn = median(x, na.rm = TRUE),
+                        min = min(x, na.rm = TRUE), max = max(x, na.rm = TRUE))
+paired <- function(a, o) { d <- a - o; t <- t.test(a, o, paired = TRUE)
+  c(n = length(d), M_aio = mean(a), SD_aio = sd(a), M_org = mean(o), SD_org = sd(o), t = unname(t$statistic),
+    df = unname(t$parameter), p = t$p.value, dz = mean(d) / sd(d), dz_lo = t$conf.int[1] / sd(d), dz_hi = t$conf.int[2] / sd(d)) }
+boot   <- function(x) { x <- x[!is.na(x)]; set.seed(SEED)
+  b <- replicate(B_REPS, mean(sample(x, replace = TRUE)))
+  c(n = length(x), est = mean(x), lo = unname(quantile(b, .025)), hi = unname(quantile(b, .975))) }
+clip   <- function(x) pmin(pmax(x, 0), 1)
+wilson <- function(k, n) { z <- 1.96; p <- k / n; m <- (p + z^2 / (2 * n)) / (1 + z^2 / n)
+  h <- z * sqrt(p * (1 - p) / n + z^2 / (4 * n^2)) / (1 + z^2 / n); c(n = n, k = k, est = p, lo = m - h, hi = m + h) }
+kappa  <- function(a, b) { po <- mean(a == b); pe <- mean(a) * mean(b) + (1 - mean(a)) * (1 - mean(b)); (po - pe) / (1 - pe) }
+kci    <- function(a, b) {        # agreement, Cohen's kappa with asymptotic 95% CI, exact McNemar test (binary codes)
+  t <- table(factor(a, 0:1), factor(b, 0:1)) / length(a); r <- rowSums(t); c <- colSums(t)
+  po <- sum(diag(t)); pe <- sum(r * c); k <- (po - pe) / (1 - pe)
+  A1 <- sum(diag(t) * (1 - (r + c) * (1 - k))^2); B1 <- (1 - k)^2 * (t[1, 2] * (c[1] + r[2])^2 + t[2, 1] * (c[2] + r[1])^2)
+  se <- unname(sqrt((A1 + B1 - (k - pe * (1 - k))^2) / length(a)) / (1 - pe))
+  c(n = length(a), agree = r1(100 * po), kappa = round(k, 2), lo = round(k - 1.96 * se, 2), hi = round(min(1, k + 1.96 * se), 2),
+    human_supported = r1(100 * mean(a)), halloumi_supported = r1(100 * mean(b)),
+    h1_m0 = sum(a == 1 & b == 0), h0_m1 = sum(a == 0 & b == 1),
+    mcnemar_p = signif(binom.test(sum(a == 1 & b == 0), sum(a != b))$p.value, 3)) }
+holm_pairs <- function(by) combn(LV, 2, simplify = FALSE) %>% map_dfr(function(pr) {   # by: lvl, n, k
+  a <- by[by$lvl == pr[1], ]; b <- by[by$lvl == pr[2], ]
+  tt <- suppressWarnings(prop.test(c(a$k, b$k), c(a$n, b$n), correct = FALSE))
+  tibble(level_1 = pr[1], level_2 = pr[2], chisq = unname(tt$statistic), p = tt$p.value) }) %>%
+  mutate(p_holm = p.adjust(p, "holm"))
+```
+
+Figure style (as in the paper: Arial, 95% CIs, white background).
+
+```{r figure_style}
+PAL  <- c(AIO = "#2a78d6", Organic = "#eb6834"); FONT <- "Arial"; ERR <- 1.96
+minus <- function(s) gsub("-", "−", s, fixed = TRUE)
+f_int <- function(x) formatC(x, format = "d", big.mark = ",")
+f_num <- function(x, d) minus(formatC(x, format = "f", digits = d, big.mark = ","))
+stars <- function(p) ifelse(p < .001, "***", ifelse(p < .01, "**", ifelse(p < .05, "*", "")))
+n_lab <- function(l, n) paste0(l, "<br>(*n* = ", f_int(n), ")")
+theme_ms <- function(base = 11) theme_classic(base_size = base, base_family = FONT) +
+  theme(plot.background = element_rect(fill = "white", colour = NA), panel.background = element_rect(fill = "white", colour = NA),
+        axis.line = element_line(colour = "black", linewidth = .4), axis.ticks = element_line(colour = "black", linewidth = .4),
+        axis.text = element_text(colour = "black"), axis.title = element_text(colour = "black"),
+        legend.position = "top", legend.title = element_blank(), plot.tag = element_text(face = "bold", size = rel(1.4)),
+        plot.margin = margin(10, 16, 8, 8))
+save_fig <- function(p, name, w, h) {         # 600-dpi PNG and vector PDF
+  name <- paste0(name, if (SHORT_ONLY) "_short" else "")
+  ggsave(file.path(FIG, paste0(name, ".png")), p, width = w, height = h, dpi = 600, bg = "white", device = ragg::agg_png)
+  ggsave(file.path(FIG, paste0(name, ".pdf")), p, width = w, height = h, bg = "white", device = grDevices::cairo_pdf)
+  p }
+# Bars of a rate by level with 95% CIs and Holm-adjusted pairwise chi-square brackets (Figures 1 and 5).
+# by: lvl, n, k (events), p, se; top: the highest CI end across both panels, so they share a y-axis.
+plot_rate <- function(by, pw, xlab, ylab, tag, top) {
+  step <- top * .13; xpos <- setNames(seq_along(LV), LV)
+  br <- pw %>% mutate(x1 = xpos[level_1], x2 = xpos[level_2],
+                      y = top + step * c(1.7, 2.7, 3.7)[match(paste(level_1, level_2), c("Low Medium", "Medium High", "Low High"))],
+                      lab = ifelse(p_holm < .05, stars(p_holm), "ns"))
+  tick <- step * .22
+  ggplot(by, aes(lvl, p)) +
+    geom_col(width = .6, fill = PAL[["AIO"]]) +
+    geom_errorbar(aes(ymin = pmax(0, p - ERR * se), ymax = p + ERR * se), width = .16, linewidth = .45) +
+    geom_text(aes(y = p + ERR * se + top * .035, label = paste0(f_num(100 * p, 1), "%")), vjust = 0, family = FONT, size = 3.6) +
+    geom_segment(data = br, aes(x = x1, xend = x2, y = y, yend = y), inherit.aes = FALSE, linewidth = .4) +
+    geom_segment(data = br, aes(x = x1, xend = x1, y = y, yend = y - tick), inherit.aes = FALSE, linewidth = .4) +
+    geom_segment(data = br, aes(x = x2, xend = x2, y = y, yend = y - tick), inherit.aes = FALSE, linewidth = .4) +
+    geom_text(data = br, aes(x = (x1 + x2) / 2, y = y + step * .06, label = lab), inherit.aes = FALSE, vjust = 0,
+              family = FONT, size = 4) +
+    scale_x_discrete(labels = function(l) n_lab(l, by$n[match(l, by$lvl)])) +
+    scale_y_continuous(labels = function(x) paste0(round(100 * x), "%"), limits = c(0, top + step * 4.4),
+                       expand = expansion(mult = c(0, 0))) +
+    labs(x = xlab, y = ylab, tag = tag) +
+    theme_ms() + theme(axis.text.x = ggtext::element_markdown(colour = "black", lineheight = 1.15))
+}
+```
+
+# Data
+
+The analysed questions (all but the 241 excluded) and, for the robustness check, the short single-turn subset. Then
+the two quality gates: overviews with at least 200 characters of text (gate 1) and pages with readable text (gate 2).
+The paired sample has readable pages in both arms.
+
+```{r data}
+QS <- rd("questions.csv") %>% filter(excluded == 0)
+if (SHORT_ONLY) QS <- QS %>% filter(n_user_turns == 1, !has_assistant_turns, q_words <= 44)
+keep <- function(d) d[d$q_index %in% QS$q_index, ]
+Q  <- keep(rd("overviews.csv")) %>% mutate(aio_present = as.logical(aio_present))
+S  <- keep(rd("sources.csv")) %>% mutate(text_quality = coalesce(text_quality, ""))
+ST <- keep(rd("statements.csv"))
+good <- Q$q_index[Q$aio_present & !is.na(Q$aio_text_len) & Q$aio_text_len >= 200]                 # gate 1
+R  <- S %>% filter(q_index %in% good, text_quality == "ok", !is.na(text_len), text_len > 0)     # gate 2
+pq <- R %>% distinct(q_index, source_type) %>% count(q_index) %>% filter(n == 2) %>% pull(q_index)
+lv <- QS %>% select(q_index, risk_level, rubric_complexity)
+c(questions = nrow(QS), aio_returned = sum(Q$aio_present), gate1 = length(good), paired = length(pq))
+```
+
+# Methods
+
+## Questions (Table 1) and searches
+
+Questions by risk level and rubric complexity, question length in words, and the searches captured.
+
+```{r sample}
+addmargins(table(Risk = factor(QS$risk_level, LV), Complexity = factor(QS$rubric_complexity, LV)))
+round(msd(QS$q_words), 1)
+SE <- keep(rd("searches.csv")); err <- coalesce(SE$error, "")
+failed <- grepl("serpapi_error|question_exception|aio_prefetch_failed", err, ignore.case = TRUE)
+c(submitted = nrow(SE), failed = sum(failed), captured = sum(!failed), aio_returned = sum(Q$aio_present),
+  pct_returned = r1(100 * sum(Q$aio_present) / sum(!failed)))
+```
+
+## JAMA and HONcode coding against human coders
+
+One human code per page (the worksheet keeps one coder's codes on the pages that all three coders coded) against the
+automated code, pooled over the six criteria. Table S7 (supplement) breaks this down by criterion.
+
+```{r jama_hon_human}
+auto <- rd("jama_hon_validation.csv") %>% select(url, all_of(CRIT))
+hum_all <- read_excel(JH_HUMAN, sheet = "Coding Worksheet _Human") %>% filter(!is.na(url)) %>% mutate(url = str_trim(url)) %>%
+  filter(!grepl("google\\.com/searchviewer|facebook\\.com", url, ignore.case = TRUE)) %>% select(Coder, url, all_of(CRIT)) %>%
+  mutate(across(all_of(CRIT), ~ suppressWarnings(as.numeric(.x)))) %>%
+  pivot_longer(all_of(CRIT), names_to = "criterion", values_to = "human") %>% filter(!is.na(human))
+stopifnot(!anyDuplicated(hum_all[c("url", "criterion")]))          # one human code per page and criterion
+hum <- hum_all %>% inner_join(auto %>% pivot_longer(all_of(CRIT), names_to = "criterion", values_to = "auto"), by = c("url", "criterion"))
+hum %>% summarise(judgments = n(), pages = n_distinct(url), agreement = r1(100 * mean(human == auto)), kappa = round(kappa(human, auto), 2))
+```
+
+## HallOumi against human coders
+
+The 100 validation statements: two coders (60 and 40 statements) and HallOumi, each judging whether the cited pages
+support the statement.
+
+```{r halloumi_human}
+SUP <- "Supported? (1 = supported, 0 = not supported)"
+VKEY <- c("Item", "Question ID", "Statement # in overview", "AI Overview statement being judged")
+hv <- read_excel(HAL_HUMAN, sheet = "Human Coding", col_types = "text") %>% select(all_of(VKEY), Coder, human = all_of(SUP)) %>%
+  inner_join(read_excel(HAL_HUMAN, sheet = "HallOumi Coding", col_types = "text") %>% select(all_of(VKEY), halloumi = all_of(SUP)), by = VKEY) %>%
+  mutate(across(c(human, halloumi), ~ as.integer(str_trim(.x))))
+stopifnot(nrow(hv) == 100, all(hv$human %in% 0:1), all(hv$halloumi %in% 0:1))
+kci(hv$human, hv$halloumi)
+```
+
+## Physician rubrics and the GPT-4.1 grader
+
+Each overview's HealthBench rubric criteria and GPT-4.1's verdict on each. Overviews are scored as in HealthBench:
+points earned divided by the maximum positive points (overall, per axis, for accuracy and completeness together, and
+for consensus criteria), plus three rates.
+
+```{r rubric_data}
+items  <- keep(rd("rubric_items.csv"))
+grades <- rd("grades_gpt41.csv") %>% select(prompt_id, item_idx, met = criteria_met)
+g <- items %>% inner_join(grades, by = c("prompt_id", "item_idx")) %>%
+  left_join(QS %>% select(q_index, theme, risk = risk_level, cx = rubric_complexity, multi = has_assistant_turns), by = "q_index")
+sc <- function(p, m) if (sum(p[p > 0]) == 0) NA_real_ else sum(p[m]) / sum(p[p > 0])
+A <-g %>% group_by(q_index, prompt_id, theme, risk, cx, multi) %>% summarise(
+  overall = sc(points, met), clinical = sc(points[axis %in% c("accuracy", "completeness")], met[axis %in% c("accuracy", "completeness")]),
+  accuracy = sc(points[axis == "accuracy"], met[axis == "accuracy"]),
+  completeness = sc(points[axis == "completeness"], met[axis == "completeness"]),
+  context_awareness = sc(points[axis == "context_awareness"], met[axis == "context_awareness"]),
+  communication_quality = sc(points[axis == "communication_quality"], met[axis == "communication_quality"]),
+  instruction_following = sc(points[axis == "instruction_following"], met[axis == "instruction_following"]),
+  consensus = sc(points[level == "cluster"], met[level == "cluster"]),
+  harm = if (any(points < 0 & axis == "accuracy")) any(met[points < 0 & axis == "accuracy"]) else NA,
+  acc_check = if (any(accuracy_check)) met[accuracy_check][1] else NA,
+  emergency = if (any(emergency_behavior)) met[emergency_behavior][1] else NA, .groups = "drop")
+n_per <- count(g, prompt_id)
+c(overviews = nrow(A), criteria = nrow(g), median_per_overview = median(n_per$n),
+  to_avoid = sum(g$points < 0), pct_to_avoid = r1(100 * mean(g$points < 0)))
+```
+
+Grader validation on HealthBench's meta-evaluation: macro-F1 of GPT-4.1 against every physician grade on the 3,000
+sampled rows, and the physician benchmark on the same rows (each physician against the other physicians, weighted by
+their number of grades), using simple-evals' pairwise definition.
+
+```{r grader_validation}
+me  <- rd("meta_eval_gpt41.csv")
+lab <- map(strsplit(me$physician_labels, ";"), ~ as.logical(as.integer(.x)))
+ids <- strsplit(me$physician_ids, ";")
+mf1 <- function(self, other) {        # pairs of (rater, other grader); macro-F1 over met / not met
+  ag <- self == other
+  f1 <- function(s) { p <- mean(ag[self == s]); r <- mean(ag[other == s]); if (is.na(p) || is.na(r)) NA else if (p + r == 0) 0 else 2 * p * r / (p + r) }
+  (f1(TRUE) + f1(FALSE)) / 2 }
+pairs_model <- map2_dfr(me$gpt41_met, lab, ~ tibble(self = .x, other = .y))
+phys <- map_dfr(seq_len(nrow(me)), function(i) { l <- lab[[i]]; id <- ids[[i]]
+  map_dfr(seq_along(l), function(j) tibble(pid = id[j], self = l[j], other = l[-j])) })
+pm <- phys %>% group_by(pid) %>% summarise(mf1 = mf1(self, other)) %>% filter(!is.na(mf1)) %>%
+  left_join(count(tibble(pid = unlist(ids)), pid, name = "n"), by = "pid")
+c(rows = nrow(me), gpt41_mf1 = round(mf1(pairs_model$self, pairs_model$other), 3), physicians_mf1 = round(weighted.mean(pm$mf1, pm$n), 3))
+```
+
+# Results
+
+## Analytic sample (Table 2)
+
+```{r table2}
+QA <- Q %>% filter(aio_present) %>% mutate(uncited = n_aio_sources == 0 | is.na(n_aio_sources)) %>%
+  left_join(QS %>% select(q_index, q_words), by = "q_index")
+rbind(aio_words = msd(QA$aio_text_words), sources_aio = msd(QA$n_aio_sources),
+      sources_aio_citing = msd(QA$n_aio_sources[!QA$uncited]), sources_organic = msd(QA$n_organic)) %>% round(2)
+c(cited = sum(!QA$uncited), uncited = sum(QA$uncited), pct_uncited = r1(100 * mean(QA$uncited)),
+  organic_5 = sum(QA$n_organic >= 5), organic_4_or_fewer = sum(QA$n_organic < 5))
+```
+
+## Uncited overviews (Figure 1)
+
+Question length of uncited and cited overviews (Welch t test, pooled-SD Cohen's d), uncited rates by complexity and
+risk (Cochran–Armitage trend tests), and Holm-adjusted pairwise tests (the brackets in Figure 1).
+
+```{r uncited}
+u <- QA$q_words[QA$uncited]; k <- QA$q_words[!QA$uncited]; wt <- t.test(u, k)
+sp <- sqrt(((length(u) - 1) * var(u) + (length(k) - 1) * var(k)) / (length(u) + length(k) - 2))
+c(M_uncited = mean(u), SD_uncited = sd(u), M_cited = mean(k), SD_cited = sd(k),
+  t = unname(wt$statistic), df = unname(wt$parameter), p = wt$p.value, d = (mean(u) - mean(k)) / sp) %>% signif(4)
+unc <- map(c(rubric_complexity = "rubric_complexity", risk_level = "risk_level"), function(v) {
+  by <- QA %>% filter(.data[[v]] %in% LV) %>% group_by(lvl = factor(.data[[v]], LV)) %>%
+    summarise(n = n(), k = sum(uncited), .groups = "drop") %>% mutate(p = k / n, se = sqrt(p * (1 - p) / n))
+  list(by = by, pw = holm_pairs(by), trend = prop.trend.test(by$k, by$n)) })
+for (v in names(unc)) {
+  print(kable(unc[[v]]$by %>% mutate(pct = r1(100 * p)) %>% select(lvl, n, uncited = k, pct), caption = v))
+  print(kable(unc[[v]]$pw %>% mutate(across(c(chisq, p, p_holm), ~ signif(.x, 3)))))
+  cat(v, ": Cochran-Armitage chi2(1) =", r1(unc[[v]]$trend$statistic, 2), ", p =", signif(unc[[v]]$trend$p.value, 3), "\n")
+}
+top1 <- max(map_dbl(unc, ~ max(.x$by$p + ERR * .x$by$se)))
+YL1 <- "AI Overviews with no citations"
+save_fig(plot_rate(unc$rubric_complexity$by, unc$rubric_complexity$pw, "Rubric complexity", YL1, "A", top1), "Figure1A_uncited_by_rubric_complexity", 5.2, 4.6)
+save_fig(plot_rate(unc$risk_level$by, unc$risk_level$pw, "Question risk level", YL1, "B", top1), "Figure1B_uncited_by_risk_level", 5.2, 4.6)
+```
+
+## Overlap of sources (Figure 2)
+
+Unique question–URL pairs among readable pages: cited by the overview only, by both, or in the organic top five only.
+
+```{r overlap}
+ov <- R %>% distinct(q_index, source_type, url) %>% count(q_index, url, name = "arms") %>%
+  left_join(R %>% distinct(q_index, url, source_type) %>% filter(source_type == "AIO") %>% transmute(q_index, url, aio = TRUE),
+            by = c("q_index", "url"))
+V <- c(pairs = nrow(ov), aio_only = sum(ov$arms == 1 & ov$aio %in% TRUE), both = sum(ov$arms == 2),
+       organic_only = sum(ov$arms == 1 & is.na(ov$aio)))
+c(V, aio_total = V[["aio_only"]] + V[["both"]], organic_total = V[["both"]] + V[["organic_only"]],
+  pct_organic_shared = r1(100 * V[["both"]] / (V[["both"]] + V[["organic_only"]])),
+  pct_organic_only = r1(100 * V[["organic_only"]] / (V[["both"]] + V[["organic_only"]])))
+# area-proportional Venn diagram; percentages are shares of the organic top five
+nA <- V[["aio_only"]] + V[["both"]]; nB <- V[["both"]] + V[["organic_only"]]; rA <- sqrt(nA / pi); rB <- sqrt(nB / pi)
+lens <- function(d, r1, r2) r1^2 * acos((d^2 + r1^2 - r2^2) / (2 * d * r1)) + r2^2 * acos((d^2 + r2^2 - r1^2) / (2 * d * r2)) -
+  .5 * sqrt((-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2))
+dAB <- uniroot(function(d) lens(d, rA, rB) - V[["both"]], c(abs(rA - rB) + 1e-6, rA + rB - 1e-6), tol = 1e-10)$root
+circ <- function(cx, r, set) { th <- seq(0, 2 * pi, length.out = 721); tibble(x = cx + r * cos(th), y = r * sin(th), set = set) }
+cc <- bind_rows(circ(0, rA, "AIO"), circ(dAB, rB, "Organic"))
+pct <- function(n) paste0(f_num(100 * n / nB, 1), "%")
+lab_g <- tibble(x = c((-rA + dAB - rB) / 2, (dAB - rB + rA) / 2, (rA + dAB + rB) / 2), y = 0,
+                txt = c(paste0("AI Overview only<br>*n* = ", f_int(V[["aio_only"]])),
+                        paste0("Both<br>*n* = ", f_int(V[["both"]]), "<br>", pct(V[["both"]])),
+                        paste0("Organic only<br>*n* = ", f_int(V[["organic_only"]]), "<br>", pct(V[["organic_only"]]))))
+head_g <- tibble(x = c(0, dAB + rB), y = c(rA, rB) + rA * .07, hj = c(.5, 1), set = c("AIO", "Organic"),
+                 txt = c(paste0("**AI Overview citations (*n* = ", f_int(nA), ")**"), paste0("**Organic top 5 (*n* = ", f_int(nB), ")**")))
+save_fig(ggplot() +
+  geom_polygon(data = cc, aes(x, y, fill = set, group = set), alpha = .28) +
+  geom_path(data = cc, aes(x, y, colour = set, group = set), linewidth = .9) +
+  ggtext::geom_richtext(data = lab_g, aes(x, y, label = txt), family = FONT, size = 3.6, lineheight = 1.1, fill = NA, label.colour = NA) +
+  ggtext::geom_richtext(data = head_g, aes(x, y, label = txt, colour = set, hjust = hj), family = FONT, size = 3.8, vjust = 0,
+                        fill = NA, label.colour = NA, label.padding = grid::unit(0, "pt")) +
+  scale_fill_manual(values = PAL) + scale_colour_manual(values = PAL) + coord_equal(clip = "off") + theme_void(base_family = FONT) +
+  theme(legend.position = "none", plot.background = element_rect(fill = "white", colour = NA), plot.margin = margin(12, 12, 12, 12)),
+  "Figure2_aio_organic_url_overlap", 7, 4.6)
+```
+
+## Source quality (Figure 3)
+
+Per-question mean JAMA and HONcode scores of the readable pages in each arm, compared with paired t tests
+(Benjamini–Hochberg across the six criteria); dz with its 95% CI. Table S10 (supplement) lists the means.
+
+```{r quality}
+qm <- R %>% filter(q_index %in% pq) %>% group_by(q_index, source_type) %>%
+  summarise(across(c(all_of(CRIT), JAMA_Total, HON_Total), ~ mean(.x, na.rm = TRUE)), .groups = "drop")
+arm <- function(v, d = qm) d %>% select(q_index, source_type, all_of(v)) %>% pivot_wider(names_from = source_type, values_from = all_of(v))
+qt <- map_dfr(CRIT, ~ { x <- arm(.x); as_tibble_row(paired(x$AIO, x$Organic)) %>% mutate(measure = .x, .before = 1) }) %>%
+  mutate(p_BH = p.adjust(p, "BH"))
+qt %>% transmute(measure, n, t = round(t, 2), p_BH = signif(p_BH, 3), dz = round(dz, 2), dz_lo = round(dz_lo, 2), dz_hi = round(dz_hi, 2)) %>% kable()
+c(differ_after_BH = sum(qt$p_BH < .05), organic_higher = sum(qt$p_BH < .05 & qt$dz < 0))
+LABEL <- setNames(sub("_", " ", CRIT), CRIT)
+fb <- qt %>% mutate(lab = factor(LABEL[measure], levels = rev(LABEL)),
+                    txt = minus(paste0(ifelse(round(dz, 2) == 0, "0.00", sprintf("%+.2f", dz)), " ", stars(p_BH))))
+save_fig(ggplot(fb, aes(dz, lab)) +
+  geom_vline(xintercept = 0, colour = "grey45", linewidth = .4) +
+  geom_errorbar(aes(xmin = dz_lo, xmax = dz_hi), width = .22, linewidth = .6, colour = "black") +
+  geom_point(size = 2.6, colour = "black") +
+  geom_text(aes(x = .32, label = txt), hjust = 0, family = FONT, size = 3.4) +
+  scale_x_continuous(breaks = seq(-.3, .3, .1), labels = function(x) minus(sprintf("%.1f", x))) +
+  coord_cartesian(xlim = c(-.3, .3), clip = "off") +
+  labs(x = expression(paste("Cohen's ", italic(d)[z], " (AI Overview − organic), 95% CI")), y = NULL) +
+  theme_ms() + theme(plot.margin = margin(10, 62, 8, 8), axis.line.y = element_blank(), axis.ticks.y = element_blank()),
+  "Figure3_jama_honcode_effect_sizes", 7.5, 3.8)
+```
+
+The same comparison within each risk level and each rubric complexity level, on the JAMA and HONcode totals
+(unadjusted).
+
+```{r quality_levels}
+ql <- map_dfr(c("risk_level", "rubric_complexity"), function(v) map_dfr(c("JAMA_Total", "HON_Total"), function(m)
+  arm(m) %>% left_join(lv, by = "q_index") %>% group_by(level = .data[[v]]) %>%
+    summarise(as_tibble_row(paired(AIO, Organic)), .groups = "drop") %>% mutate(variable = v, measure = m)))
+ql %>% transmute(variable, measure, level, n, dz = round(dz, 2), p = signif(p, 3)) %>% kable()
+c(comparisons = nrow(ql), favor_organic = sum(ql$dz < 0), significant = sum(ql$p < .05))
+```
+
+## Statement grounding (Figures 4 and 5)
+
+Composition of all overview statements and the support rate of statements scorable against a cited page.
+
+```{r statements}
+st <- ST %>% filter(q_index %in% good) %>%
+  mutate(bucket = case_when(status == "uncited" & uncited_type == "uncited_factual" ~ "uncited factual",
+                            status == "uncited" ~ "header or conversational", TRUE ~ status))
+st %>% count(bucket) %>% mutate(pct = r1(100 * n / sum(n))) %>% kable()
+sco <- st %>% filter(status %in% c("supported", "unsupported"))
+c(statements = nrow(st), overviews = n_distinct(st$q_index), scorable = nrow(sco), pct_scorable = r1(100 * nrow(sco) / nrow(st)),
+  supported = sum(sco$status == "supported"), not_supported = sum(sco$status == "unsupported"),
+  support_rate = r1(100 * mean(sco$status == "supported"), 2))
+fj <- st %>% count(bucket) %>% tibble::deframe()
+fj <- tibble(part = c("Supported", "Not supported", "Factual, uncited", "Indeterminate", "Headers &\nconversational"),
+             n = c(fj[["supported"]], fj[["unsupported"]], fj[["uncited factual"]], fj[["skipped"]], fj[["header or conversational"]])) %>%
+  mutate(part = factor(part, levels = part), pct = 100 * n / sum(n), ymid = sum(n) - (cumsum(n) - n / 2),
+         txt = paste0(part, "\n", f_int(n), " (", f_num(pct, 1), "%)"),
+         ink = ifelse(part %in% c("Indeterminate", "Headers &\nconversational"), "black", "white"))
+stopifnot(sum(fj$n) == nrow(st))
+save_fig(ggplot(fj, aes(x = 1, y = n, fill = part)) +
+  geom_col(width = 1, colour = "white", linewidth = .8) +
+  geom_text(aes(x = 1.12, y = ymid, label = txt, colour = ink), family = FONT, size = 3.5, lineheight = .95) +
+  coord_polar(theta = "y", start = 0, direction = -1) + scale_y_continuous(limits = c(0, sum(fj$n))) + xlim(c(.5, 1.5)) +
+  scale_fill_manual(values = c("Supported" = PAL[["AIO"]], "Not supported" = PAL[["Organic"]], "Factual, uncited" = "#5b626c",
+                               "Indeterminate" = "#a3a9b2", "Headers &\nconversational" = "#d9dce1")) +
+  scale_colour_identity() + theme_void(base_family = FONT) +
+  theme(legend.position = "none", plot.background = element_rect(fill = "white", colour = NA)),
+  "Figure4_statement_composition", 6, 6)
+```
+
+The observed support rate with a 95% CI from resampling questions (statements are nested in questions), and the rate
+corrected for HallOumi's misclassification: the Rogan–Gladen estimator with HallOumi's sensitivity and specificity
+against the human coders on the 100 validation statements. Its 95% CI comes from a bootstrap (5,000 resamples) that
+resamples the validation statements by overview and the scorable statements by question.
+
+```{r halloumi_correction}
+scq <- sco %>% group_by(q_index) %>% summarise(sup = sum(status == "supported"), n = n()) %>%
+  left_join(QS %>% select(q_index, boot_order), by = "q_index") %>% arrange(boot_order)   # resampling order of the original analysis
+boot_ratio <- function(num, den, B = 2000) {     # pooled rate sum(num) / sum(den), resampling questions
+  set.seed(0); n <- length(num)
+  b <- replicate(B, { i <- sample.int(n, n, replace = TRUE); sum(num[i]) / sum(den[i]) })
+  c(est = sum(num) / sum(den), lo = unname(quantile(b, .025)), hi = unname(quantile(b, .975))) }
+se_sp <- function(d) c(se = mean(d$halloumi[d$human == 1]), sp = mean(1 - d$halloumi[d$human == 0]))
+rogan <- function(p, a) unname((p + a["sp"] - 1) / (a["se"] + a["sp"] - 1))
+set.seed(0)
+vcl <- split(seq_len(nrow(hv)), hv$`Question ID`); nv <- length(vcl); ns <- nrow(scq)
+cb <- clip(replicate(5000, { vb <- hv[unlist(vcl[sample.int(nv, nv, replace = TRUE)]), ]; i <- sample.int(ns, ns, replace = TRUE)
+  rogan(sum(scq$sup[i]) / sum(scq$n[i]), se_sp(vb)) }))
+a <- se_sp(hv); obs <- boot_ratio(scq$sup, scq$n)
+c(sensitivity = r1(100 * a[["se"]]), sens_k = sum(hv$halloumi[hv$human == 1]), sens_n = sum(hv$human == 1),
+  specificity = r1(100 * a[["sp"]]), spec_k = sum(hv$halloumi[hv$human == 0] == 0), spec_n = sum(hv$human == 0),
+  observed = r1(100 * obs[["est"]]), observed_lo = r1(100 * obs[["lo"]]), observed_hi = r1(100 * obs[["hi"]]),
+  corrected = r1(100 * clip(rogan(obs[["est"]], a))), corrected_lo = r1(100 * unname(quantile(cb, .025, na.rm = TRUE))),
+  corrected_hi = r1(100 * unname(quantile(cb, .975, na.rm = TRUE))))
+```
+
+Support by rubric complexity and risk level (chi-square tests), with Holm-adjusted pairwise tests for Figure 5.
+
+```{r support_levels}
+sup <- map(c(rubric_complexity = "rubric_complexity", risk_level = "risk_level"), function(v) {
+  by <- sco %>% left_join(lv, by = "q_index") %>% group_by(lvl = factor(.data[[v]], LV)) %>%
+    summarise(n = n(), k = sum(status == "supported"), .groups = "drop") %>% mutate(p = k / n, se = sqrt(p * (1 - p) / n))
+  list(by = by, pw = holm_pairs(by), chi = chisq.test(cbind(by$k, by$n - by$k))) })
+for (v in names(sup)) {
+  print(kable(sup[[v]]$by %>% mutate(rate = r1(100 * p)) %>% select(lvl, scored = n, supported = k, rate), caption = v))
+  print(kable(sup[[v]]$pw %>% mutate(across(c(chisq, p, p_holm), ~ signif(.x, 3)))))
+  cat(v, ": chi2(", sup[[v]]$chi$parameter, ", N = ", sum(sup[[v]]$by$n), ") = ", r1(sup[[v]]$chi$statistic, 2),
+      ", p = ", signif(sup[[v]]$chi$p.value, 3), "\n", sep = "")
+}
+top5 <- max(map_dbl(sup, ~ max(.x$by$p + ERR * .x$by$se)))
+YL5 <- "Cited statements supported by the cited page"
+save_fig(plot_rate(sup$rubric_complexity$by, sup$rubric_complexity$pw, "Rubric complexity", YL5, "A", top5), "Figure5A_support_by_rubric_complexity", 5.2, 4.6)
+save_fig(plot_rate(sup$risk_level$by, sup$risk_level$pw, "Question risk level", YL5, "B", top5), "Figure5B_support_by_risk_level", 5.2, 4.6)
+```
+
+## Accuracy against physician rubrics (Table 3)
+
+Scores (% of available points, 95% bootstrap CIs) and rates (% of overviews, Wilson 95% CIs).
+
+```{r table3}
+SC <- c("overall", "clinical", "accuracy", "completeness", "context_awareness", "communication_quality", "consensus", "instruction_following")
+map_dfr(SC, ~ as_tibble_row(boot(A[[.x]])) %>% mutate(measure = .x, .before = 1)) %>%
+  mutate(across(c(est, lo, hi), ~ r1(100 * clip(.x))), n = as.integer(n)) %>% kable(caption = "Scores")
+map_dfr(c("harm", "acc_check", "emergency"), ~ as_tibble_row(wilson(sum(A[[.x]], na.rm = TRUE), sum(!is.na(A[[.x]])))) %>%
+  mutate(measure = .x, .before = 1)) %>% mutate(across(c(est, lo, hi), ~ r1(100 * .x))) %>% kable(caption = "Rates")
+```
+
+Clinical scores (accuracy and completeness) by rubric complexity and risk level, and the share of each complexity
+level's clinical criteria that are consensus criteria.
+
+```{r rubric_levels}
+lvl <- function(v, x = "clinical", d = A) d %>% group_by(level = factor(.data[[v]], LV)) %>%
+  summarise(as_tibble_row(boot(.data[[x]])), .groups = "drop") %>% mutate(across(c(est, lo, hi), ~ r1(100 * clip(.x))))
+kable(lvl("cx"), caption = "Clinical score by complexity"); kable(lvl("risk"), caption = "Clinical score by risk")
+g %>% filter(axis %in% c("accuracy", "completeness")) %>% group_by(cx = factor(cx, LV)) %>%
+  summarise(consensus_share = r1(100 * mean(level == "cluster"), 0))
+```
+
+Clinical scores with referral criteria removed (HealthBench's emergency-referral consensus criterion and every accuracy
+or completeness criterion about seeking or referring to care), by risk level.
+
+```{r referral}
+nr <- g %>% filter(axis %in% c("accuracy", "completeness"), !referral) %>% group_by(prompt_id) %>% summarise(noref = sc(points, met))
+A2 <- A %>% left_join(nr, by = "prompt_id")
+kable(lvl("risk", "noref", A2 %>% filter(!is.na(clinical))), caption = "Clinical score without referral criteria, by risk")
+c(excluded_no_criteria_left = sum(!is.na(A2$clinical) & is.na(A2$noref)))
+```
+
+## Accuracy, source quality, and grounding
+
+Spearman correlations of the clinical score with the JAMA and HONcode totals of the cited pages and with the support
+rate (cited overviews with all three measures); the clinical score of uncited and cited overviews (Welch t test); and
+the correlation of the clinical score with overview length.
+
+```{r correlates}
+hal  <- ST %>% group_by(q_index) %>% summarise(sup = sum(status == "supported"), uns = sum(status == "unsupported")) %>%
+  mutate(support_rate = ifelse(sup + uns > 0, sup / (sup + uns), NA))
+qual <- R %>% filter(source_type == "AIO") %>% group_by(q_index) %>%
+  summarise(jama = mean(JAMA_Total, na.rm = TRUE), hon = mean(HON_Total, na.rm = TRUE))
+D <- A2 %>% left_join(rd("graded_overviews.csv") %>% select(prompt_id, aio_words), by = "prompt_id") %>%
+  left_join(Q %>% select(q_index, n_aio_sources), by = "q_index") %>% left_join(hal, by = "q_index") %>% left_join(qual, by = "q_index") %>%
+  mutate(uncited = is.na(n_aio_sources) | n_aio_sources == 0, clinical_pts = 100 * clinical)
+cd <- D %>% filter(!uncited, !is.na(support_rate), !is.na(jama), !is.na(hon), !is.na(clinical))
+spear <- function(x, y) { t <- cor.test(x, y, method = "spearman", exact = FALSE); c(rho = round(unname(t$estimate), 3), p = signif(t$p.value, 3)) }
+rbind(JAMA = spear(cd$jama, cd$clinical), HONcode = spear(cd$hon, cd$clinical), grounding = spear(cd$support_rate, cd$clinical),
+      overview_length = spear(D$aio_words, D$clinical)) %>% cbind(n = c(rep(nrow(cd), 3), sum(!is.na(D$clinical) & !is.na(D$aio_words))))
+x <- D$clinical_pts[D$uncited & !is.na(D$clinical)]; y <- D$clinical_pts[!D$uncited & !is.na(D$clinical)]; tt <- t.test(x, y)
+c(n_uncited = length(x), M_uncited = r1(mean(x)), n_cited = length(y), M_cited = r1(mean(y)),
+  t = round(unname(tt$statistic), 2), df = r1(unname(tt$parameter)), p = signif(tt$p.value, 3))
+```
+
+```{r session}
+sessionInfo()
+```
