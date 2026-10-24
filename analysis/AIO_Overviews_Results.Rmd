@@ -298,9 +298,9 @@ pct <- function(n) paste0(f_num(100 * n / nB, 1), "%")
 lab_g <- tibble(x = c((-rA + dAB - rB) / 2, (dAB - rB + rA) / 2, (rA + dAB + rB) / 2), y = 0,
                 txt = c(paste0("AI Overview only<br>*n* = ", f_int(V[["aio_only"]])),
                         paste0("Both<br>*n* = ", f_int(V[["both"]]), "<br>", pct(V[["both"]])),
-                        paste0("Organic only<br>*n* = ", f_int(V[["organic_only"]]), "<br>", pct(V[["organic_only"]]))))
+                        paste0("Traditional only<br>*n* = ", f_int(V[["organic_only"]]), "<br>", pct(V[["organic_only"]]))))
 head_g <- tibble(x = c(0, dAB + rB), y = c(rA, rB) + rA * .07, hj = c(.5, 1), set = c("AIO", "Organic"),
-                 txt = c(paste0("**AI Overview citations (*n* = ", f_int(nA), ")**"), paste0("**Organic top 5 (*n* = ", f_int(nB), ")**")))
+                 txt = c(paste0("**AI Overview citations (*n* = ", f_int(nA), ")**"), paste0("**Traditional top 5 (*n* = ", f_int(nB), ")**")))
 save_fig(ggplot() +
   geom_polygon(data = cc, aes(x, y, fill = set, group = set), alpha = .28) +
   geom_path(data = cc, aes(x, y, colour = set, group = set), linewidth = .9) +
@@ -335,7 +335,7 @@ save_fig(ggplot(fb, aes(dz, lab)) +
   geom_text(aes(x = .32, label = txt), hjust = 0, family = FONT, size = 3.4) +
   scale_x_continuous(breaks = seq(-.3, .3, .1), labels = function(x) minus(sprintf("%.1f", x))) +
   coord_cartesian(xlim = c(-.3, .3), clip = "off") +
-  labs(x = expression(paste("Cohen's ", italic(d)[z], " (AI Overview − organic), 95% CI")), y = NULL) +
+  labs(x = expression(paste("Cohen's ", italic(d)[z], " (AI Overview − traditional), 95% CI")), y = NULL) +
   theme_ms() + theme(plot.margin = margin(10, 62, 8, 8), axis.line.y = element_blank(), axis.ticks.y = element_blank()),
   "Figure3_jama_honcode_effect_sizes", 7.5, 3.8)
 ```
