@@ -1,6 +1,6 @@
 # How the pipeline works
 
-The paper's appendix describes the methods in brief. This file holds the implementation details it leaves out, stage by stage, and points to the code for each stage. The complete supplementary material is in [`Supplementary_Material.pdf`](Supplementary_Material.pdf).
+The paper's appendix describes the methods in brief. This file holds the implementation details it leaves out, stage by stage, and points to the code for each stage.
 
 ## Contents
 
@@ -39,7 +39,7 @@ The paper's appendix describes the methods in brief. This file holds the impleme
 | Rubric grading | `pipeline/rubric_grading/`: `scripts/build_deck.py`, `prepare_aio.py`, `make_requests.py`, `batch_openai_seq.py`, `parse_results.py`, `score.py`, run by `run_stage2.ps1`; settings in `config.py` | Builds one GPT-4.1 request per AI Overview and rubric criterion with HealthBench's grader prompt, sends them through the Batch API, parses the verdicts, and scores each overview. |
 | Grader validation | `scripts/meta_eval.py`, `scripts/meta_eval_paper.py`, run by `run_stage1e.ps1` | Scores the grader against physicians on HealthBench's meta-evaluation set. |
 | Public data | `pipeline/export_public_data.R`, `pipeline/export_full_data.py` | Write `data/` and the full archive without HealthBench text. |
-| Analysis | `analysis/AIO_Overviews_Results.Rmd`, `analysis/AIO_Overviews_Supplement.R` | Reproduce every number, table, and figure in the paper and its supplementary material. |
+| Analysis | `analysis/AIO_Overviews_Results.Rmd`, `analysis/AIO_Overviews_Supplement.R` | Reproduce every number, table, and figure in the paper, its appendix, and this file. |
 
 API keys are read from the environment (`SERPAPI_KEY`, `OPENAI_API_KEY`) and are not included.
 

@@ -10,8 +10,7 @@ physician-rubric accuracy (GPT-4.1 grader).
 | Folder | Contents |
 |---|---|
 | `PIPELINE.md` | How each stage of the pipeline works: the implementation details the paper's appendix leaves out, with a map of the code for each stage. |
-| `Supplementary_Material.pdf` | The paper's supplementary material (Supplementary Methods and Results, Figure S1, Tables S1–S12). |
-| `analysis/` | `AIO_Overviews_Results.Rmd` reproduces every number, table, and figure in the main paper; `AIO_Overviews_Supplement.R` does the same for the supplement. Knitted output and figures are included. |
+| `analysis/` | `AIO_Overviews_Results.Rmd` reproduces every number, table, and figure in the main paper; `AIO_Overviews_Supplement.R` does the same for the appendix and `PIPELINE.md`. Knitted output and figures are included. |
 | `data/` | The analysis files (one row per question, page, statement, rubric criterion, or GPT-4.1 verdict). |
 | `Manual Coding Checks/` | The two human-coding workbooks (JAMA/HONcode pages and HallOumi statements) that the agreement analyses read. |
 | `pipeline/scrape/` | Search capture (SerpAPI), page retrieval, JAMA and HONcode coding, and HallOumi scoring (notebooks run locally by `run_pipeline.py` and `run_gpu_scoring.py`). |
