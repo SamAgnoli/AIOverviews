@@ -2,13 +2,14 @@
 
 Code and data for "Does the Citation Matter? Grounding, Quality, and Physician-Rated Accuracy of Google's AI Overviews
 for Medical Information": 3,611 HealthBench questions sent to Google (September 16–18, 2026), each AI Overview compared
-with the top five organic results on source overlap, JAMA and HONcode quality, statement grounding (HallOumi), and
+with the top five traditional results on source overlap, JAMA and HONcode quality, statement grounding (HallOumi), and
 physician-rubric accuracy (GPT-4.1 grader).
 
 ## Folders
 
 | Folder | Contents |
 |---|---|
+| `PIPELINE.md` | How each stage of the pipeline works: the implementation details the paper's appendix leaves out, with a map of the code for each stage. |
 | `Supplementary_Material.pdf` | The paper's supplementary material (Supplementary Methods and Results, Figure S1, Tables S1–S12). |
 | `analysis/` | `AIO_Overviews_Results.Rmd` reproduces every number, table, and figure in the main paper; `AIO_Overviews_Supplement.R` does the same for the supplement. Knitted output and figures are included. |
 | `data/` | The analysis files (one row per question, page, statement, rubric criterion, or GPT-4.1 verdict). |
@@ -29,7 +30,7 @@ line at the top of the R Markdown and knit again.
   analysed questions, HealthBench's `prompt_id`, which links each one to
   [HealthBench](https://github.com/openai/simple-evals). Rubric criteria appear as their HealthBench indices.
 - `questions.csv`: risk level, rubric complexity, theme, turns, length in words, and the 241 excluded questions.
-- `overviews.csv`, `sources.csv`, `statements.csv`: AI Overviews, every cited page and organic result (with JAMA and
+- `overviews.csv`, `sources.csv`, `statements.csv`: AI Overviews, every cited page and traditional result (with JAMA and
   HONcode codes), and every overview statement (with its HallOumi verdict).
 - `rubric_items.csv`, `grades_gpt41.csv`, `graded_overviews.csv`: rubric criteria, GPT-4.1's verdicts, overview length.
 - `meta_eval_gpt41.csv`: GPT-4.1 and physician grades on the 3,000 meta-evaluation rows used to validate the grader.
