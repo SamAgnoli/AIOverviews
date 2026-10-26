@@ -2483,11 +2483,13 @@ kable(lvl(&quot;risk&quot;, &quot;noref&quot;, A2 %&gt;% filter(!is.na(clinical)
 </div>
 <div id="accuracy-source-quality-and-grounding" class="section level2">
 <h2>Accuracy, source quality, and grounding</h2>
-<p>Spearman correlations of the clinical score with the JAMA and HONcode
-totals of the cited pages and with the support rate (cited overviews
-with all three measures); the clinical score of uncited and cited
-overviews (Welch t test); and the correlation of the clinical score with
-overview length.</p>
+<p>Spearman correlations (rho to two decimals, as reported) of the
+clinical score with the JAMA and HONcode totals of the cited pages and
+with the support rate, and of the support rate with the accuracy and
+completeness scores separately (cited overviews with all three
+measures); the clinical score of uncited and cited overviews (Welch t
+test); and the correlation of the clinical score with overview
+length.</p>
 <pre class="r"><code>hal  &lt;- ST %&gt;% group_by(q_index) %&gt;% summarise(sup = sum(status == &quot;supported&quot;), uns = sum(status == &quot;unsupported&quot;)) %&gt;%
   mutate(support_rate = ifelse(sup + uns &gt; 0, sup / (sup + uns), NA))
 qual &lt;- R %&gt;% filter(source_type == &quot;AIO&quot;) %&gt;% group_by(q_index) %&gt;%
@@ -2496,14 +2498,18 @@ D &lt;- A2 %&gt;% left_join(rd(&quot;graded_overviews.csv&quot;) %&gt;% select(p
   left_join(Q %&gt;% select(q_index, n_aio_sources), by = &quot;q_index&quot;) %&gt;% left_join(hal, by = &quot;q_index&quot;) %&gt;% left_join(qual, by = &quot;q_index&quot;) %&gt;%
   mutate(uncited = is.na(n_aio_sources) | n_aio_sources == 0, clinical_pts = 100 * clinical)
 cd &lt;- D %&gt;% filter(!uncited, !is.na(support_rate), !is.na(jama), !is.na(hon), !is.na(clinical))
-spear &lt;- function(x, y) { t &lt;- cor.test(x, y, method = &quot;spearman&quot;, exact = FALSE); c(rho = round(unname(t$estimate), 3), p = signif(t$p.value, 3)) }
+spear &lt;- function(x, y) { ok &lt;- !is.na(x) &amp; !is.na(y); t &lt;- cor.test(x[ok], y[ok], method = &quot;spearman&quot;, exact = FALSE)
+  c(rho = round(unname(t$estimate), 2), p = signif(t$p.value, 3), n = sum(ok)) }
 rbind(JAMA = spear(cd$jama, cd$clinical), HONcode = spear(cd$hon, cd$clinical), grounding = spear(cd$support_rate, cd$clinical),
-      overview_length = spear(D$aio_words, D$clinical)) %&gt;% cbind(n = c(rep(nrow(cd), 3), sum(!is.na(D$clinical) &amp; !is.na(D$aio_words))))</code></pre>
-<pre><code>                   rho        p    n
-JAMA            -0.055 2.88e-03 2973
-HONcode          0.097 1.07e-07 2973
-grounding        0.013 4.67e-01 2973
-overview_length  0.145 1.32e-17 3460</code></pre>
+      grounding_accuracy = spear(cd$support_rate, cd$accuracy), grounding_completeness = spear(cd$support_rate, cd$completeness),
+      overview_length = spear(D$aio_words, D$clinical))</code></pre>
+<pre><code>                         rho        p    n
+JAMA                   -0.05 2.88e-03 2973
+HONcode                 0.10 1.07e-07 2973
+grounding               0.01 4.67e-01 2973
+grounding_accuracy      0.01 7.59e-01 2605
+grounding_completeness -0.04 5.52e-02 2514
+overview_length         0.14 1.32e-17 3460</code></pre>
 <pre class="r"><code>x &lt;- D$clinical_pts[D$uncited &amp; !is.na(D$clinical)]; y &lt;- D$clinical_pts[!D$uncited &amp; !is.na(D$clinical)]; tt &lt;- t.test(x, y)
 c(n_uncited = length(x), M_uncited = r1(mean(x)), n_cited = length(y), M_cited = r1(mean(y)),
   t = round(unname(tt$statistic), 2), df = r1(unname(tt$parameter)), p = signif(tt$p.value, 3))</code></pre>

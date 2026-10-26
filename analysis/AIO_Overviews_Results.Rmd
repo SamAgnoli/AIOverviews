@@ -478,9 +478,10 @@ c(excluded_no_criteria_left = sum(!is.na(A2$clinical) & is.na(A2$noref)))
 
 ## Accuracy, source quality, and grounding
 
-Spearman correlations of the clinical score with the JAMA and HONcode totals of the cited pages and with the support
-rate (cited overviews with all three measures); the clinical score of uncited and cited overviews (Welch t test); and
-the correlation of the clinical score with overview length.
+Spearman correlations (rho to two decimals, as reported) of the clinical score with the JAMA and HONcode totals of the
+cited pages and with the support rate, and of the support rate with the accuracy and completeness scores separately
+(cited overviews with all three measures); the clinical score of uncited and cited overviews (Welch t test); and the
+correlation of the clinical score with overview length.
 
 ```{r correlates}
 hal  <- ST %>% group_by(q_index) %>% summarise(sup = sum(status == "supported"), uns = sum(status == "unsupported")) %>%
@@ -491,9 +492,11 @@ D <- A2 %>% left_join(rd("graded_overviews.csv") %>% select(prompt_id, aio_words
   left_join(Q %>% select(q_index, n_aio_sources), by = "q_index") %>% left_join(hal, by = "q_index") %>% left_join(qual, by = "q_index") %>%
   mutate(uncited = is.na(n_aio_sources) | n_aio_sources == 0, clinical_pts = 100 * clinical)
 cd <- D %>% filter(!uncited, !is.na(support_rate), !is.na(jama), !is.na(hon), !is.na(clinical))
-spear <- function(x, y) { t <- cor.test(x, y, method = "spearman", exact = FALSE); c(rho = round(unname(t$estimate), 3), p = signif(t$p.value, 3)) }
+spear <- function(x, y) { ok <- !is.na(x) & !is.na(y); t <- cor.test(x[ok], y[ok], method = "spearman", exact = FALSE)
+  c(rho = round(unname(t$estimate), 2), p = signif(t$p.value, 3), n = sum(ok)) }
 rbind(JAMA = spear(cd$jama, cd$clinical), HONcode = spear(cd$hon, cd$clinical), grounding = spear(cd$support_rate, cd$clinical),
-      overview_length = spear(D$aio_words, D$clinical)) %>% cbind(n = c(rep(nrow(cd), 3), sum(!is.na(D$clinical) & !is.na(D$aio_words))))
+      grounding_accuracy = spear(cd$support_rate, cd$accuracy), grounding_completeness = spear(cd$support_rate, cd$completeness),
+      overview_length = spear(D$aio_words, D$clinical))
 x <- D$clinical_pts[D$uncited & !is.na(D$clinical)]; y <- D$clinical_pts[!D$uncited & !is.na(D$clinical)]; tt <- t.test(x, y)
 c(n_uncited = length(x), M_uncited = r1(mean(x)), n_cited = length(y), M_cited = r1(mean(y)),
   t = round(unname(tt$statistic), 2), df = r1(unname(tt$parameter)), p = signif(tt$p.value, 3))
