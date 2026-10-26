@@ -439,8 +439,21 @@ map_dfr(c("harm", "acc_check", "emergency"), ~ as_tibble_row(wilson(sum(A[[.x]],
   mutate(measure = .x, .before = 1)) %>% mutate(across(c(est, lo, hi), ~ r1(100 * .x))) %>% kable(caption = "Rates")
 ```
 
-Clinical scores (accuracy and completeness) by rubric complexity and risk level, and the share of each complexity
-level's clinical criteria that are consensus criteria.
+Where accuracy points were lost (positive criteria not met vs. negative criteria met, % of all lost accuracy points),
+and how often overviews that passed the general "no factually incorrect information" criterion still made an error
+physicians named for that question.
+
+```{r accuracy_errors}
+acc  <- g %>% filter(axis == "accuracy")
+lost <- c(missing_content = sum(acc$points[acc$points > 0 & !acc$met]), stated_errors = sum(-acc$points[acc$points < 0 & acc$met]))
+r1(100 * lost / sum(lost), 0)
+pg <- A %>% filter(acc_check %in% TRUE, !is.na(harm))     # passed the general check; rubric also names specific errors
+c(passed_general_check = nrow(pg), made_named_error = sum(pg$harm), pct = r1(100 * mean(pg$harm), 0))
+```
+
+Clinical scores (accuracy and completeness) by rubric complexity and risk level, the share of each complexity
+level's clinical criteria that are consensus criteria, and how often overviews met consensus and question-specific
+clinical criteria (positive criteria only).
 
 ```{r rubric_levels}
 lvl <- function(v, x = "clinical", d = A) d %>% group_by(level = factor(.data[[v]], LV)) %>%
@@ -448,6 +461,9 @@ lvl <- function(v, x = "clinical", d = A) d %>% group_by(level = factor(.data[[v
 kable(lvl("cx"), caption = "Clinical score by complexity"); kable(lvl("risk"), caption = "Clinical score by risk")
 g %>% filter(axis %in% c("accuracy", "completeness")) %>% group_by(cx = factor(cx, LV)) %>%
   summarise(consensus_share = r1(100 * mean(level == "cluster"), 0))
+g %>% filter(axis %in% c("accuracy", "completeness"), points > 0) %>%
+  group_by(criteria = ifelse(level == "cluster", "consensus", "question-specific")) %>%
+  summarise(n = n(), pct_met = r1(100 * mean(met), 0))
 ```
 
 Clinical scores with referral criteria removed (HealthBench's emergency-referral consensus criterion and every accuracy

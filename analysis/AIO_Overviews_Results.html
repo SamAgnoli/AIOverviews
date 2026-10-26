@@ -2329,9 +2329,23 @@ map_dfr(SC, ~ as_tibble_row(boot(A[[.x]])) %&gt;% mutate(measure = .x, .before =
 </tr>
 </tbody>
 </table>
+<p>Where accuracy points were lost (positive criteria not met
+vs. negative criteria met, % of all lost accuracy points), and how often
+overviews that passed the general “no factually incorrect information”
+criterion still made an error physicians named for that question.</p>
+<pre class="r"><code>acc  &lt;- g %&gt;% filter(axis == &quot;accuracy&quot;)
+lost &lt;- c(missing_content = sum(acc$points[acc$points &gt; 0 &amp; !acc$met]), stated_errors = sum(-acc$points[acc$points &lt; 0 &amp; acc$met]))
+r1(100 * lost / sum(lost), 0)</code></pre>
+<pre><code>missing_content   stated_errors 
+             89              11 </code></pre>
+<pre class="r"><code>pg &lt;- A %&gt;% filter(acc_check %in% TRUE, !is.na(harm))     # passed the general check; rubric also names specific errors
+c(passed_general_check = nrow(pg), made_named_error = sum(pg$harm), pct = r1(100 * mean(pg$harm), 0))</code></pre>
+<pre><code>passed_general_check     made_named_error                  pct 
+                 606                  168                   28 </code></pre>
 <p>Clinical scores (accuracy and completeness) by rubric complexity and
-risk level, and the share of each complexity level’s clinical criteria
-that are consensus criteria.</p>
+risk level, the share of each complexity level’s clinical criteria that
+are consensus criteria, and how often overviews met consensus and
+question-specific clinical criteria (positive criteria only).</p>
 <pre class="r"><code>lvl &lt;- function(v, x = &quot;clinical&quot;, d = A) d %&gt;% group_by(level = factor(.data[[v]], LV)) %&gt;%
   summarise(as_tibble_row(boot(.data[[x]])), .groups = &quot;drop&quot;) %&gt;% mutate(across(c(est, lo, hi), ~ r1(100 * clip(.x))))
 kable(lvl(&quot;cx&quot;), caption = &quot;Clinical score by complexity&quot;); kable(lvl(&quot;risk&quot;), caption = &quot;Clinical score by risk&quot;)</code></pre>
@@ -2413,6 +2427,14 @@ kable(lvl(&quot;cx&quot;), caption = &quot;Clinical score by complexity&quot;); 
 1 Low                 57
 2 Medium               4
 3 High                 9</code></pre>
+<pre class="r"><code>g %&gt;% filter(axis %in% c(&quot;accuracy&quot;, &quot;completeness&quot;), points &gt; 0) %&gt;%
+  group_by(criteria = ifelse(level == &quot;cluster&quot;, &quot;consensus&quot;, &quot;question-specific&quot;)) %&gt;%
+  summarise(n = n(), pct_met = r1(100 * mean(met), 0))</code></pre>
+<pre><code># A tibble: 2 × 3
+  criteria              n pct_met
+  &lt;chr&gt;             &lt;int&gt;   &lt;dbl&gt;
+1 consensus          3070      91
+2 question-specific 18393      43</code></pre>
 <p>Clinical scores with referral criteria removed (HealthBench’s
 emergency-referral consensus criterion and every accuracy or
 completeness criterion about seeking or referring to care), by risk
